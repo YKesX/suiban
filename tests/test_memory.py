@@ -244,9 +244,7 @@ def test_delete_session_survives_archive_backreference(store: MemoryStore) -> No
     # an archive entry citing the session as its source must not block the delete
     store.ensure_session("sess-src", "chat")
     store.add_message("sess-src", "user", "the sequoia benchmark")
-    entry = store.add_entry(
-        "archive", "sequoia note", "benchmark held", source_session="sess-src"
-    )
+    entry = store.add_entry("archive", "sequoia note", "benchmark held", source_session="sess-src")
     assert store.delete_session("sess-src") is True
     # the entry is kept, its dangling back-reference nulled
     kept = store.get_entry(entry.id)
