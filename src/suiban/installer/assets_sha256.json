@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "SHA-256 digests for the pinned PrismML llama.cpp fork release assets.",
+    "Tag prism-b9596-9fcaed7 (PrismML-Eng/llama.cpp).",
+    "Captured verbatim from the GitHub releases API asset 'digest' field at author",
+    "time (2026-07-22). The installer (installer/binaries.py) recomputes sha256 over",
+    "each downloaded archive and HARD-FAILS on any mismatch. A filename whose value",
+    "is null has no checked-in digest and is downloaded WITHOUT an integrity check",
+    "(the installer warns; see KNOWN_ISSUES.md). Do not edit by hand: regenerate from",
+    "the releases API when the pinned tag is bumped."
+  ],
+  "tag": "prism-b9596-9fcaed7",
+  "algorithm": "sha256",
+  "source": "github-releases-api-asset-digest",
+  "captured_at": "2026-07-22",
+  "digests": {
+    "cudart-llama-bin-win-cuda-12.4-x64.zip": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+    "llama-bin-win-cpu-arm64.zip": "c11f365c15028ca611a2b3f5e0ec6c590e27df7047f629d599f6d0821135e0d7",
+    "llama-bin-win-cpu-x64.zip": "d0f989f8f035894f4b98c4165305d769a4c14adc841f54a489a157145b1c7a58",
+    "llama-bin-win-hip-radeon-x64.zip": "5a4abb0df2ba488b0ab6e9045b676c31f577b4a3ecc8519546437e9812059c32",
+    "llama-bin-win-vulkan-x64.zip": "df77bdbd5df228745546ec80912d5e60385fbbcc8334617e84d13e2843593d57",
+    "llama-prism-b1-9fcaed7-bin-win-cuda-12.4-x64.zip": "6d109e2930c0eaf2f729c3a6fc58dd7809ce2ba7047bfb294547cc389af6de5d",
+    "llama-prism-b9596-9fcaed7-bin-linux-cuda-12.4-x64.tar.gz": "c9c266bdcedda6f457d69ac28cf7a43166affa5ee0f87c5067d47484e4098a71",
+    "llama-prism-b9596-9fcaed7-bin-linux-cuda-12.8-x64.tar.gz": "d2d982ace4ef50b239a427f28568215b3617a9ee3b7e7fe11aea865a2ae0061a",
+    "llama-prism-b9596-9fcaed7-bin-macos-arm64-kleidiai.tar.gz": "c66fa1ff21512230ea58bcf5c3f8a9aa3c9222a1d8189f463703d17647939925",
+    "llama-prism-b9596-9fcaed7-bin-macos-arm64.tar.gz": "9c14bcdba8c99378ca3fd4dbf3c28f94bb8c528186a80f8bc40b5fdd7edb9937",
+    "llama-prism-b9596-9fcaed7-bin-macos-x64.tar.gz": "06c182e47295cccfead6b3cff1a4fa91b347974141b3a8b26d2231b4396db2f8",
+    "llama-prism-b9596-9fcaed7-bin-ubuntu-arm64.tar.gz": "4bf7ac9514f78bf25bd09c4f70ee5c5b5885c4781bfe48d093c4374d141c11b8",
+    "llama-prism-b9596-9fcaed7-bin-ubuntu-rocm-7.2-x64.tar.gz": "dde1ace3720dc48feae89d6c24e4ea3519485bf8c378fa09019208cb04ab0a40",
+    "llama-prism-b9596-9fcaed7-bin-ubuntu-vulkan-arm64.tar.gz": "521fff87553d5a65a630587218539105dbdfaf29d057a0a1e37038c3e828973f",
+    "llama-prism-b9596-9fcaed7-bin-ubuntu-vulkan-x64.tar.gz": "6871dc3a26c27151f9d045d0d97e781b356286591b222ccbb0d5b975410bcbfb",
+    "llama-prism-b9596-9fcaed7-bin-ubuntu-x64.tar.gz": "e361c09f128a407c659d07361b008155e1eab0cd0ed0a12ccdcf7147f7c22948",
+    "llama-prism-b9596-9fcaed7-xcframework.zip": "8b45caaaf7f832ec2bc9ea2a2a024c609ad1781f67171f5421ab55b9ac8e03a9"
+  }
+}

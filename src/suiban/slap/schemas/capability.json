@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slap.dev/schemas/capability.json",
+  "title": "SLAP capability",
+  "description": "An agent instance advertises its capabilities for capability-based routing.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "SLAP"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "const": "capability"
+    },
+    "parent_task": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_family": {
+      "type": "string"
+    },
+    "parameters": {
+      "type": "string"
+    },
+    "quantization": {
+      "type": "string"
+    },
+    "context_limit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "modalities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "structured_output_reliability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "latency_ms_estimate": {
+      "type": "number",
+      "minimum": 0
+    },
+    "memory_mb_estimate": {
+      "type": "number",
+      "minimum": 0
+    },
+    "compute_cost_estimate": {
+      "type": "number",
+      "minimum": 0
+    },
+    "task_categories": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "max_task_complexity": {
+      "type": "string"
+    },
+    "current_workload": {
+      "type": "number",
+      "minimum": 0
+    },
+    "backend": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol",
+    "version",
+    "message_id",
+    "task_id",
+    "operation",
+    "model"
+  ],
+  "additionalProperties": false
+}

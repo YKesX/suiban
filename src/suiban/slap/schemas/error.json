@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slap.dev/schemas/error.json",
+  "title": "SLAP error",
+  "description": "Structured failure from any agent.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "SLAP"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "const": "error"
+    },
+    "parent_task": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "message": {
+      "type": "string"
+    },
+    "retriable": {
+      "type": "boolean"
+    },
+    "partial_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "protocol",
+    "version",
+    "message_id",
+    "task_id",
+    "operation",
+    "code"
+  ],
+  "additionalProperties": false
+}

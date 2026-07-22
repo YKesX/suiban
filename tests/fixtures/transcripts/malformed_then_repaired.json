@@ -1,0 +1,92 @@
+{
+  "description": "One schema-violating call is repaired after the repair prompt.",
+  "max_iterations": 8,
+  "responses": [
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"bogus\": 1}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_2",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"fixed call\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "recovered and finished"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    }
+  ],
+  "expect": {
+    "final_text": "recovered and finished",
+    "finish_reason": "stop",
+    "tool_result_statuses": [
+      "error",
+      "ok"
+    ],
+    "executed_notes": [
+      "fixed call"
+    ],
+    "tool_stats": {
+      "tool_calls": 2,
+      "malformed_calls": 1,
+      "repaired_calls": 1,
+      "abandoned_calls": 0
+    },
+    "usage_has_malformed_fields": true
+  }
+}

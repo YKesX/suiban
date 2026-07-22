@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Lint + tests only. No publishing, no releases — ever (repo policy).
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-extras
+      # Contract + unit tests run against the mock llama backend; no GPU, no models.
+      - run: SUIBAN_LLAMA_MOCK=1 uv run pytest -q
+
+  turboquant-cpu:
+    # Builds the vendored TurboQuant patchset against the pinned PrismML fork tag and
+    # runs the CPU kernel unit tests (MSE-vs-paper targets). CPU only — no GPU in CI.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-extras
+      - run: uv run python vendor/apply_patches.py --clone --cpu-only
+      - run: uv run python vendor/run_kernel_tests.py

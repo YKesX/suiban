@@ -1,0 +1,43 @@
+# --- Python / uv ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- models & downloaded runtime (bootstrap fetches these; never committed) ---
+*.gguf
+models/
+bin/
+# fork source checkout (patch target) — never committed
+vendor/llama.cpp/
+vendor/build/
+# compiled on demand by run_kernel_tests.py stage 7 (source stays)
+vendor/tools/tq_cuda_numeric
+
+# --- local state (real config lives in ~/.bonsai, never in-repo) ---
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db
+logs/
+*.log
+
+# --- secrets ---
+.env
+.env.*
+*.token
+*.secret
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

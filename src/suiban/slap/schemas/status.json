@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slap.dev/schemas/status.json",
+  "title": "SLAP status",
+  "description": "Task-graph / agent-state snapshot.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "SLAP"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "const": "status"
+    },
+    "parent_task": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "task_state": {
+      "enum": [
+        "pending",
+        "assigned",
+        "running",
+        "review",
+        "accepted",
+        "rejected",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workload": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol",
+    "version",
+    "message_id",
+    "task_id",
+    "operation",
+    "task_state"
+  ],
+  "additionalProperties": false
+}

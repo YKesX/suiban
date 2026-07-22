@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slap.dev/schemas/cancel.json",
+  "title": "SLAP cancel",
+  "description": "Orchestrator cancels a task.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "SLAP"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "const": "cancel"
+    },
+    "parent_task": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol",
+    "version",
+    "message_id",
+    "task_id",
+    "operation"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,65 @@
+{
+  "description": "Happy path: one valid tool call, then the final answer.",
+  "max_iterations": 8,
+  "responses": [
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"checked the file\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "done: the file checks out"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    }
+  ],
+  "expect": {
+    "final_text": "done: the file checks out",
+    "finish_reason": "stop",
+    "tool_result_statuses": [
+      "ok"
+    ],
+    "executed_notes": [
+      "checked the file"
+    ],
+    "tool_stats": {
+      "tool_calls": 1,
+      "malformed_calls": 0,
+      "repaired_calls": 0,
+      "abandoned_calls": 0
+    },
+    "usage_has_malformed_fields": false
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slap.dev/schemas/review.json",
+  "title": "SLAP review",
+  "description": "Reviewer's verdict on an artifact.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "SLAP"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "const": "review"
+    },
+    "parent_task": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "approved",
+        "changes_required",
+        "rejected"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "category": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "recommended_action": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "category"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "required": [
+    "protocol",
+    "version",
+    "message_id",
+    "task_id",
+    "operation",
+    "target",
+    "status"
+  ],
+  "additionalProperties": false
+}

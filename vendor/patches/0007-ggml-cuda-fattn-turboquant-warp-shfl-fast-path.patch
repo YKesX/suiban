@@ -1,0 +1,165 @@
+Subject: [PATCH 7/7] ggml-cuda: warp-shfl butterfly fast path for TurboQuant fattn V dequant
+
+Target: PrismML-Eng/llama.cpp tag prism-b9596-9fcaed7, after patches 0001-0006.
+
+Implements the patch-0006 TODO: a warp-cooperative shfl-butterfly fast path in
+fattn-common.cuh dequantize_V_tq (clean-room, like the rest of the CUDA
+patchset — no code from the unlicensed community gist).
+
+The vec kernel assigns the 8 four-code groups of one 32-value TurboQuant block
+to 8 consecutive lanes (i0 % 32 == (lane % 8) * 4). The fast path exploits
+that: each lane unpacks only its own 4 codes, then the 5-stage inverse
+Walsh-Hadamard butterfly runs as 2 in-register stages (j bits 0-1) plus 3
+__shfl_xor_sync stages across the aligned 8-lane group (j bits 2-4) — 16 adds
++ 12 shuffles per 4 outputs instead of the closed form's full-block decode +
+4x32 parity-sum adds.
+
+Safety: the lane-assignment assumption is verified warp-wide at runtime with
+__all_sync, so the branch is warp-uniform by construction — any caller with a
+different thread mapping (and the ne == 2 instantiation) degrades to the
+closed-form reference path instead of hitting shuffle UB. HIP keeps the
+reference path (wave64 + different vote semantics; TODO(v1.1) if ROCm support
+lands). Both paths compute the same butterfly in the same pairwise order, so
+numerics match the CPU reference within fp32 round-off; validated on-device
+by vendor/tools/tq_cuda_numeric.cpp (run_kernel_tests.py stage 7) and by
+llama-bench before/after tables in suiban/docs/benchmarks.md.
+---
+diff --git a/ggml/src/ggml-cuda/fattn-common.cuh b/ggml/src/ggml-cuda/fattn-common.cuh
+index 2fbe638..79c25ee 100644
+--- a/ggml/src/ggml-cuda/fattn-common.cuh
++++ b/ggml/src/ggml-cuda/fattn-common.cuh
+@@ -621,39 +621,108 @@ static __device__ __forceinline__ void dequantize_V_q8_0(const void * __restrict
+ // TurboQuant TQ3_0/TQ4_0 V cache (see turboquant.cuh). Unlike the per-element
+ // formats above, TurboQuant dequantization needs the whole 32-value block (the
+ // inverse randomized Hadamard transform mixes every coordinate into every
+-// output), so each thread decodes the full block it lands in and evaluates its
+-// ne outputs via the closed-form parity sum. The vec kernel always calls with
+-// ne == 4 and i0 % 4 == 0, so a group never straddles a block boundary
+-// (4 | 32). Reference implementation, correctness first.
+-// TODO(v1.1): warp-cooperative shfl-butterfly fast path (the vec kernel's 32
+-// V-threads of a warp read consecutive i0 of the same row) if profiling of the
+-// decode-bound long-context case shows it matters.
++// output). Two paths compute the same values:
++//
++// * Warp-shfl fast path (CUDA, ne == 4): the vec kernel hands the 8 four-code
++//   groups of one 32-value block to 8 consecutive lanes (i0 % 32 ==
++//   (lane % 8) * 4 on every lane — verified warp-wide at runtime with
++//   __all_sync, so an unforeseen caller degrades to the reference path
++//   instead of hitting shuffle UB). Each lane loads only its own 4 codes; the
++//   5-stage inverse Walsh-Hadamard butterfly runs as 2 register stages
++//   (j bits 0-1, in-lane) plus 3 __shfl_xor_sync stages (j bits 2-4, across
++//   the aligned 8-lane group): 16 adds + 12 shuffles per 4 outputs instead of
++//   the closed form's full-block decode + 4x32 parity adds.
++// * Reference path (ne == 2, HIP, unexpected lane patterns): each thread
++//   decodes the full block it lands in and evaluates its ne outputs via the
++//   closed-form parity sum (validated by vendor/run_kernel_tests.py stage 6).
+ template <typename T, int ne, ggml_type type_V>
+ static __device__ __forceinline__ void dequantize_V_tq(const void * __restrict__ vx, void * __restrict__ dst, const int64_t i0) {
+     static_assert(ne == 2 || ne == 4, "bad ne");
+ 
+-    float c[QK_TQ];
+-    float d;
+-    if constexpr (type_V == GGML_TYPE_TQ3_0) {
+-        const block_tq3_0 * x = (const block_tq3_0 *) vx;
+-        const int64_t ib = i0 / QK_TQ3_0;
+-        ggml_cuda_tq3_0_block_centroids(&x[ib], c);
+-        d = __half2float(x[ib].d);
+-    } else {
+-        static_assert(type_V == GGML_TYPE_TQ3_0 || type_V == GGML_TYPE_TQ4_0, "bad type");
+-        const block_tq4_0 * x = (const block_tq4_0 *) vx;
+-        const int64_t ib = i0 / QK_TQ4_0;
+-        ggml_cuda_tq4_0_block_centroids(&x[ib], c);
+-        d = __half2float(x[ib].d);
+-    }
+-
+     const int   j0 = i0 % QK_TQ;
+-    const float dn = d * TQ_RSQRT32;
+-
+     float vals[ne];
++    bool  done = false;
++
++#ifndef GGML_USE_HIP
++    if constexpr (ne == 4) {
++        if (__all_sync(0xFFFFFFFF, (int) (threadIdx.x % 8)*4 == j0)) {
++            float r[4];
++            float d;
++            if constexpr (type_V == GGML_TYPE_TQ3_0) {
++                const block_tq3_0 * x = (const block_tq3_0 *) vx;
++                const int64_t ib = i0 / QK_TQ3_0;
++                uint8_t qs[QK_TQ3_0*3/8];
++                ggml_cuda_memcpy_1<QK_TQ3_0*3/8, 2>(qs, x[ib].qs);
++#pragma unroll
++                for (int l = 0; l < 4; ++l) {
++                    r[l] = tq3_0_centroids[ggml_cuda_tq3_0_get_code(qs, j0 + l)];
++                }
++                d = __half2float(x[ib].d);
++            } else {
++                static_assert(type_V == GGML_TYPE_TQ3_0 || type_V == GGML_TYPE_TQ4_0, "bad type");
++                const block_tq4_0 * x = (const block_tq4_0 *) vx;
++                const int64_t ib = i0 / QK_TQ4_0;
++                uint8_t qs[QK_TQ4_0/2];
++                ggml_cuda_memcpy_1<QK_TQ4_0/2, 2>(qs, x[ib].qs);
+ #pragma unroll
+-    for (int l = 0; l < ne; ++l) {
+-        vals[l] = ggml_cuda_tq_dequant_elem(c, j0 + l, dn);
++                for (int l = 0; l < 4; ++l) {
++                    r[l] = tq4_0_centroids[ggml_cuda_tq4_0_get_code(qs, j0 + l)];
++                }
++                d = __half2float(x[ib].d);
++            }
++
++            // WHT stages m = 1, 2 (j bits 0-1): both butterfly partners live
++            // in this lane's registers. Same pairwise order as the CPU
++            // reference butterfly: low element a+b, high element a-b.
++            {
++                float t0, t1;
++                t0 = r[0]; t1 = r[1]; r[0] = t0 + t1; r[1] = t0 - t1;
++                t0 = r[2]; t1 = r[3]; r[2] = t0 + t1; r[3] = t0 - t1;
++                t0 = r[0]; t1 = r[2]; r[0] = t0 + t1; r[2] = t0 - t1;
++                t0 = r[1]; t1 = r[3]; r[1] = t0 + t1; r[3] = t0 - t1;
++            }
++            // WHT stages m = 4, 8, 16 (j bits 2-4): the partner element sits
++            // in lane ^ (m/4) of the aligned 8-lane group.
++#pragma unroll
++            for (int lm = 1; lm <= 4; lm <<= 1) {
++#pragma unroll
++                for (int l = 0; l < 4; ++l) {
++                    const float other = __shfl_xor_sync(0xFFFFFFFF, r[l], lm, 8);
++                    r[l] = (threadIdx.x & lm) ? (other - r[l]) : (r[l] + other);
++                }
++            }
++
++            const float dn = d * TQ_RSQRT32;
++#pragma unroll
++            for (int l = 0; l < 4; ++l) {
++                vals[l] = r[l] * ggml_cuda_tq_sign(j0 + l) * dn;
++            }
++            done = true;
++        }
++    }
++#endif // GGML_USE_HIP
++
++    if (!done) {
++        float c[QK_TQ];
++        float d;
++        if constexpr (type_V == GGML_TYPE_TQ3_0) {
++            const block_tq3_0 * x = (const block_tq3_0 *) vx;
++            const int64_t ib = i0 / QK_TQ3_0;
++            ggml_cuda_tq3_0_block_centroids(&x[ib], c);
++            d = __half2float(x[ib].d);
++        } else {
++            static_assert(type_V == GGML_TYPE_TQ3_0 || type_V == GGML_TYPE_TQ4_0, "bad type");
++            const block_tq4_0 * x = (const block_tq4_0 *) vx;
++            const int64_t ib = i0 / QK_TQ4_0;
++            ggml_cuda_tq4_0_block_centroids(&x[ib], c);
++            d = __half2float(x[ib].d);
++        }
++
++        const float dn = d * TQ_RSQRT32;
++#pragma unroll
++        for (int l = 0; l < ne; ++l) {
++            vals[l] = ggml_cuda_tq_dequant_elem(c, j0 + l, dn);
++        }
+     }
+ 
+ #ifdef FP16_AVAILABLE

@@ -1,0 +1,109 @@
+suiban
+Copyright 2026 Yağızhan Keskin
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+This NOTICE file is provided for attribution per section 4(d) of that license.
+
+suiban is the inference & orchestration core of the bonsai stack. It runs the
+PrismML Bonsai model family on a local PrismML llama.cpp fork. The credits below
+cover the models, the fork, the vendored KV-cache patchset and the third-party
+libraries suiban depends on.
+
+================================================================================
+Models and the inference fork
+================================================================================
+
+PrismML Bonsai models
+  The Bonsai 27B / 8B / 4B / 1.7B model family (ternary `Q2_0` and 1-bit `Q1_0`
+  GGUF builds), published by PrismML on Hugging Face under `prism-ml/*`
+  (e.g. prism-ml/Ternary-Bonsai-27B-gguf, prism-ml/Bonsai-27B-gguf). Weights are
+  downloaded at install time; they are not redistributed in this repository and
+  carry their own upstream model license.
+
+PrismML llama.cpp fork
+  Inference is performed by prebuilt binaries of the PrismML llama.cpp fork,
+  `PrismML-Eng/llama.cpp` (branch `prism`), pinned to release
+  `prism-b9596-9fcaed7`. The fork is downloaded at install time and is not
+  redistributed here.
+
+llama.cpp / ggml (MIT)
+  The fork, and suiban's vendored patchset, build on llama.cpp and ggml.
+  Copyright (c) 2023-2026 The ggml authors. Licensed under the MIT License.
+  https://github.com/ggml-org/llama.cpp
+
+================================================================================
+TurboQuant KV-cache patchset (suiban/vendor/)
+================================================================================
+
+TurboQuant algorithm
+  A. Zandieh, M. Daliri, M. Hagemann, S. Voinea, I. Han,
+  "TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate,"
+  arXiv:2504.19874. https://arxiv.org/abs/2504.19874
+  suiban's `TQ4_0` / `TQ3_0` GGML types implement this algorithm's MSE variant.
+
+TQ3_0 CPU reference port (MIT)
+  suiban's `TQ3_0` CPU kernels are ported from the MIT-licensed branch
+  `Aaryan-Kapoor/llama.cpp`, branch `turboquant-tq3_0`, commit
+  1fb1fb3ab6b3e5c3776a362d7ac7f5985328d71b.
+  Copyright (c) Aaryan Kapoor. Licensed under the MIT License.
+  The quantization pipeline, the 8-level codebook constants, the 3-bit packing
+  scheme and the test tolerance come from that branch. `TQ4_0` is an original
+  extension of the same pattern to 16 levels. See vendor/README.md and
+  docs/turboquant.md for the full patch inventory and divergences.
+
+llama.cpp community discussion
+  The randomized-Hadamard-transform substitution for the paper's Gaussian
+  rotation follows the consensus in the llama.cpp community discussion
+  ggml-org/llama.cpp#20969
+  (https://github.com/ggml-org/llama.cpp/discussions/20969). Cited for its
+  ideas and reported numbers; no code from it is used.
+
+Community CUDA gist (no license, no code used)
+  A community CUDA gist by Jim Sullivan (veritatisquaesitoressumus) carries NO
+  license. None of its code is used in this repository. It is cited in
+  vendor/README.md and docs/turboquant.md for its published measurement numbers
+  and integration ideas only; suiban's CUDA kernels (patches 0005-0007) are
+  clean-room work derived from the CPU reference semantics and mainline
+  quantized-KV CUDA idioms.
+
+================================================================================
+Skills and memory
+================================================================================
+
+agentskills.io
+  suiban's skill format (SKILL.md frontmatter with `name` / `description`) is
+  compatible with the agentskills.io convention. https://agentskills.io
+
+Skill-format interoperability: openclaw and Hermes (MIT, no code copied)
+  suiban can import agentskills.io `SKILL.md` directory skills from other
+  ecosystems, and its own skills export back the same way (the format is
+  portable both directions). Two such ecosystems are supported by name:
+    - openclaw: https://github.com/openclaw/openclaw (MIT)
+    - Hermes (hermes-agent): https://github.com/nousresearch/hermes-agent (MIT)
+  Only their `SKILL.md` skills are read, through the shared agentskills.io
+  format; NO source code from either project is used or redistributed here.
+
+Hermes memory architecture (design inspiration, no code)
+  suiban's layered, on-demand memory design (cheap always-available identity /
+  state layers plus retrieval that is fetched by tool call rather than always
+  prepended) is inspired by the Hermes memory architecture. The inspiration is
+  conceptual only: the four-layer split and the visible, tool-driven recall
+  approach were informed by it, while suiban's storage (plain files + SQLite
+  FTS5), write-enforcement rules and implementation are its own. No code was
+  borrowed. See docs/memory.md.
+
+================================================================================
+Third-party Python libraries
+================================================================================
+
+suiban depends on the following libraries, each under its own license (installed
+at bootstrap into a local virtualenv; not redistributed in this repository):
+
+  FastAPI (MIT), Starlette (BSD-3-Clause), Uvicorn (BSD-3-Clause),
+  Pydantic (MIT), httpx (BSD-3-Clause), huggingface_hub (Apache-2.0),
+  nvidia-ml-py (BSD-3-Clause), psutil (BSD-3-Clause), Typer (MIT),
+  tomli-w (MIT), readability-lxml (Apache-2.0),
+  python-telegram-bot (LGPL-3.0-or-later; OPTIONAL: the Telegram gateway extra,
+  imported only when that gateway is enabled).
+
+Each library's full license text is available in its own distribution.

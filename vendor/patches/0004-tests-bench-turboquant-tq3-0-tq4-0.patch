@@ -1,0 +1,59 @@
+Subject: [PATCH 4/4] tests, llama-bench: TQ3_0 / TQ4_0 coverage
+
+test-quantize-fns tolerances: TQ3 max quantization error 0.0060 (from the
+MIT turboquant-tq3_0 reference; measured 0.004182 on this suite), TQ4 0.0030
+(set empirically; measured 0.002111 — see suiban/vendor/README.md). Dot
+product error grouped with the ternary bound (0.15); measured 0.061 / 0.017.
+llama-bench learns the tq3_0/tq4_0 type names for -ctk/-ctv sweeps.
+---
+diff --git a/tests/test-quantize-fns.cpp b/tests/test-quantize-fns.cpp
+index f354284..dd4fcf8 100644
+--- a/tests/test-quantize-fns.cpp
++++ b/tests/test-quantize-fns.cpp
+@@ -25,6 +25,10 @@ constexpr float MAX_QUANTIZATION_TOTAL_ERROR_2BITS = 0.0075f;
+ constexpr float MAX_QUANTIZATION_TOTAL_ERROR_3BITS = 0.0040f;
+ constexpr float MAX_QUANTIZATION_TOTAL_ERROR_3BITS_XXS = 0.0050f;
+ constexpr float MAX_QUANTIZATION_TOTAL_ERROR_FP4 = 0.0030f;
++// TurboQuant KV-cache types: TQ3 tolerance from the MIT turboquant-tq3_0 reference;
++// TQ4 tolerance set empirically for our extension (measured value in suiban/vendor/README.md)
++constexpr float MAX_QUANTIZATION_TOTAL_ERROR_TQ3 = 0.0060f;
++constexpr float MAX_QUANTIZATION_TOTAL_ERROR_TQ4 = 0.0030f;
+ constexpr float MAX_DOT_PRODUCT_ERROR = 0.02f;
+ constexpr float MAX_DOT_PRODUCT_ERROR_LOWBIT = 0.04f;
+ constexpr float MAX_DOT_PRODUCT_ERROR_FP4 = 0.03f;
+@@ -155,6 +159,8 @@ int main(int argc, char * argv[]) {
+                 type == GGML_TYPE_Q2_0    ? MAX_QUANTIZATION_TOTAL_ERROR_Q2_0 :
+                 type == GGML_TYPE_TQ1_0   ? MAX_QUANTIZATION_TOTAL_ERROR_TERNARY :
+                 type == GGML_TYPE_TQ2_0   ? MAX_QUANTIZATION_TOTAL_ERROR_TERNARY :
++                type == GGML_TYPE_TQ3_0   ? MAX_QUANTIZATION_TOTAL_ERROR_TQ3 :
++                type == GGML_TYPE_TQ4_0   ? MAX_QUANTIZATION_TOTAL_ERROR_TQ4 :
+                 type == GGML_TYPE_Q2_K    ? MAX_QUANTIZATION_TOTAL_ERROR_2BITS :
+                 type == GGML_TYPE_IQ2_S   ? MAX_QUANTIZATION_TOTAL_ERROR_2BITS :
+                 type == GGML_TYPE_Q3_K    ? MAX_QUANTIZATION_TOTAL_ERROR_3BITS :
+@@ -182,7 +188,8 @@ int main(int argc, char * argv[]) {
+                                           ? MAX_DOT_PRODUCT_ERROR_BINARY
+                                           : type == GGML_TYPE_Q2_0
+                                           ? MAX_DOT_PRODUCT_ERROR_Q2_0
+-                                          : type == GGML_TYPE_TQ1_0 || type == GGML_TYPE_TQ2_0
++                                          : type == GGML_TYPE_TQ1_0 || type == GGML_TYPE_TQ2_0 ||
++                                            type == GGML_TYPE_TQ3_0 || type == GGML_TYPE_TQ4_0
+                                           ? MAX_DOT_PRODUCT_ERROR_TERNARY
+                                           : type == GGML_TYPE_NVFP4
+                                           ? MAX_DOT_PRODUCT_ERROR_FP4
+diff --git a/tools/llama-bench/llama-bench.cpp b/tools/llama-bench/llama-bench.cpp
+index a85f86c..31320e0 100644
+--- a/tools/llama-bench/llama-bench.cpp
++++ b/tools/llama-bench/llama-bench.cpp
+@@ -496,6 +496,12 @@ static ggml_type ggml_type_from_name(const std::string & s) {
+     if (s == "iq4_nl") {
+         return GGML_TYPE_IQ4_NL;
+     }
++    if (s == "tq3_0") {
++        return GGML_TYPE_TQ3_0;
++    }
++    if (s == "tq4_0") {
++        return GGML_TYPE_TQ4_0;
++    }
+ 
+     return GGML_TYPE_COUNT;
+ }

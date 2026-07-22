@@ -1,0 +1,597 @@
+{
+  "description": "20-step long-haul: every step executes in order, then completion.",
+  "max_iterations": 32,
+  "responses": [
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-01\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_2",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-02\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_3",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-03\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_4",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-04\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_5",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-05\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_6",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-06\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_7",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-07\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_8",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-08\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_9",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-09\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_10",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-10\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_11",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-11\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_12",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-12\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_13",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-13\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_14",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-14\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_15",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-15\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_16",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-16\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_17",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-17\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_18",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-18\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_19",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-19\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_20",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"note\": \"step-20\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "all 20 steps recorded \u2014 task complete"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    }
+  ],
+  "expect": {
+    "final_text": "all 20 steps recorded \u2014 task complete",
+    "finish_reason": "stop",
+    "tool_result_statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "executed_notes": [
+      "step-01",
+      "step-02",
+      "step-03",
+      "step-04",
+      "step-05",
+      "step-06",
+      "step-07",
+      "step-08",
+      "step-09",
+      "step-10",
+      "step-11",
+      "step-12",
+      "step-13",
+      "step-14",
+      "step-15",
+      "step-16",
+      "step-17",
+      "step-18",
+      "step-19",
+      "step-20"
+    ],
+    "tool_stats": {
+      "tool_calls": 20,
+      "malformed_calls": 0,
+      "repaired_calls": 0,
+      "abandoned_calls": 0
+    },
+    "usage_has_malformed_fields": false
+  }
+}

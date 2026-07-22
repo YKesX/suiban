@@ -1,0 +1,290 @@
+Subject: [PATCH 6/6] ggml-cuda: TurboQuant TQ3_0 / TQ4_0 flash-attention support
+
+Target: PrismML-Eng/llama.cpp tag prism-b9596-9fcaed7, after patches 0001-0005.
+
+- fattn-common.cuh: dequantize_V_tq3_0/tq4_0 (per-thread closed-form parity-sum
+  inverse RHT; the vec kernel calls with ne == 4 and i0 % 4 == 0, so a group
+  never straddles a 32-block) + get_dequantize_V dispatch entries.
+- fattn.cu: support-check gating — the mixed pair K = F16/Q8_0 with
+  V = TQ3_0/TQ4_0 is explicitly allowed in ALL builds (bypasses the
+  no-GGML_CUDA_FA_ALL_QUANTS K != V restriction); any other K paired with a
+  TurboQuant V returns BEST_FATTN_KERNEL_NONE so it can never reach the vec
+  dispatch abort (the op then falls back to another backend, never crashes).
+  Vec dispatch cases for the four supported pairs are always compiled.
+- fattn-vec.cuh: extern template declarations for the new instances.
+- template-instances: 4 new fattn-vec instance files (K in {f16, q8_0} x V in
+  {tq3_0, tq4_0}, head dims 64/128/256 — Bonsai uses 128 and 256), and
+  generate_cu_files.py regenerates them.
+- CMakeLists.txt: the TQ instances are compiled in BOTH build flavors (with
+  and without GGML_CUDA_FA_ALL_QUANTS). suiban's `apply_patches.py --cuda`
+  still passes -DGGML_CUDA_FA_ALL_QUANTS=ON so every non-suiban mixed K/V
+  pair also works; the flag is not required for the suiban pairs.
+
+Decoding V=TQ4_0 rows in the vec kernel costs ~32 adds per output element
+(the inverse rotation mixes the whole block) — a reference implementation,
+correctness first. TODO(v1.1): warp-cooperative shfl-butterfly fast path if
+the decode-bound long-context case shows up in profiling.
+---
+diff --git a/ggml/src/ggml-cuda/CMakeLists.txt b/ggml/src/ggml-cuda/CMakeLists.txt
+index 2e3cd57..14f9a5a 100644
+--- a/ggml/src/ggml-cuda/CMakeLists.txt
++++ b/ggml/src/ggml-cuda/CMakeLists.txt
+@@ -117,11 +117,18 @@ if (CUDAToolkit_FOUND)
+         list(APPEND GGML_SOURCES_CUDA ${SRCS})
+         add_compile_definitions(GGML_CUDA_FA_ALL_QUANTS)
+     else()
++        # TurboQuant (tq3_0/tq4_0) V-cache instances are compiled in all builds:
++        # the K = f16/q8_0 mixed pairs are explicitly allowed in the fattn
++        # support check even without GGML_CUDA_FA_ALL_QUANTS.
+         list(APPEND GGML_SOURCES_CUDA
+             template-instances/fattn-vec-instance-f16-f16.cu
+             template-instances/fattn-vec-instance-q4_0-q4_0.cu
+             template-instances/fattn-vec-instance-q8_0-q8_0.cu
+-            template-instances/fattn-vec-instance-bf16-bf16.cu)
++            template-instances/fattn-vec-instance-bf16-bf16.cu
++            template-instances/fattn-vec-instance-f16-tq3_0.cu
++            template-instances/fattn-vec-instance-q8_0-tq3_0.cu
++            template-instances/fattn-vec-instance-f16-tq4_0.cu
++            template-instances/fattn-vec-instance-q8_0-tq4_0.cu)
+     endif()
+ 
+     ggml_add_backend_library(ggml-cuda
+diff --git a/ggml/src/ggml-cuda/fattn-common.cuh b/ggml/src/ggml-cuda/fattn-common.cuh
+index 8dfa51a..2fbe638 100644
+--- a/ggml/src/ggml-cuda/fattn-common.cuh
++++ b/ggml/src/ggml-cuda/fattn-common.cuh
+@@ -2,6 +2,7 @@
+ 
+ #include "common.cuh"
+ #include "convert.cuh"
++#include "turboquant.cuh"
+ #include "vecdotq.cuh"
+ 
+ #include <cstdint>
+@@ -617,6 +618,72 @@ static __device__ __forceinline__ void dequantize_V_q8_0(const void * __restrict
+     }
+ }
+ 
++// TurboQuant TQ3_0/TQ4_0 V cache (see turboquant.cuh). Unlike the per-element
++// formats above, TurboQuant dequantization needs the whole 32-value block (the
++// inverse randomized Hadamard transform mixes every coordinate into every
++// output), so each thread decodes the full block it lands in and evaluates its
++// ne outputs via the closed-form parity sum. The vec kernel always calls with
++// ne == 4 and i0 % 4 == 0, so a group never straddles a block boundary
++// (4 | 32). Reference implementation, correctness first.
++// TODO(v1.1): warp-cooperative shfl-butterfly fast path (the vec kernel's 32
++// V-threads of a warp read consecutive i0 of the same row) if profiling of the
++// decode-bound long-context case shows it matters.
++template <typename T, int ne, ggml_type type_V>
++static __device__ __forceinline__ void dequantize_V_tq(const void * __restrict__ vx, void * __restrict__ dst, const int64_t i0) {
++    static_assert(ne == 2 || ne == 4, "bad ne");
++
++    float c[QK_TQ];
++    float d;
++    if constexpr (type_V == GGML_TYPE_TQ3_0) {
++        const block_tq3_0 * x = (const block_tq3_0 *) vx;
++        const int64_t ib = i0 / QK_TQ3_0;
++        ggml_cuda_tq3_0_block_centroids(&x[ib], c);
++        d = __half2float(x[ib].d);
++    } else {
++        static_assert(type_V == GGML_TYPE_TQ3_0 || type_V == GGML_TYPE_TQ4_0, "bad type");
++        const block_tq4_0 * x = (const block_tq4_0 *) vx;
++        const int64_t ib = i0 / QK_TQ4_0;
++        ggml_cuda_tq4_0_block_centroids(&x[ib], c);
++        d = __half2float(x[ib].d);
++    }
++
++    const int   j0 = i0 % QK_TQ;
++    const float dn = d * TQ_RSQRT32;
++
++    float vals[ne];
++#pragma unroll
++    for (int l = 0; l < ne; ++l) {
++        vals[l] = ggml_cuda_tq_dequant_elem(c, j0 + l, dn);
++    }
++
++#ifdef FP16_AVAILABLE
++    if constexpr (std::is_same_v<T, half>) {
++#pragma unroll
++        for (int l0 = 0; l0 < ne; l0 += 2) {
++            ((half2 *) dst)[l0/2] = make_half2(vals[l0 + 0], vals[l0 + 1]);
++        }
++    } else
++#endif // FP16_AVAILABLE
++    if constexpr (std::is_same_v<T, float>) {
++#pragma unroll
++        for (int l = 0; l < ne; ++l) {
++            ((float *) dst)[l] = vals[l];
++        }
++    } else {
++        static_assert(std::is_same_v<T, void>, "bad type");
++    }
++}
++
++template <typename T, int ne>
++static __device__ __forceinline__ void dequantize_V_tq3_0(const void * __restrict__ vx, void * __restrict__ dst, const int64_t i0) {
++    dequantize_V_tq<T, ne, GGML_TYPE_TQ3_0>(vx, dst, i0);
++}
++
++template <typename T, int ne>
++static __device__ __forceinline__ void dequantize_V_tq4_0(const void * __restrict__ vx, void * __restrict__ dst, const int64_t i0) {
++    dequantize_V_tq<T, ne, GGML_TYPE_TQ4_0>(vx, dst, i0);
++}
++
+ template <ggml_type type_K, int D, int nthreads>
+ constexpr __device__ vec_dot_KQ_t get_vec_dot_KQ() {
+     if constexpr (type_K == GGML_TYPE_F16) {
+@@ -653,6 +720,10 @@ constexpr __device__ dequantize_V_t get_dequantize_V() {
+         return dequantize_V_q5_1<T, ne>;
+     } else if constexpr (type_V == GGML_TYPE_Q8_0) {
+         return dequantize_V_q8_0<T, ne>;
++    } else if constexpr (type_V == GGML_TYPE_TQ3_0) {
++        return dequantize_V_tq3_0<T, ne>;
++    } else if constexpr (type_V == GGML_TYPE_TQ4_0) {
++        return dequantize_V_tq4_0<T, ne>;
+     } else if constexpr (type_V == GGML_TYPE_BF16) {
+         return dequantize_V_bf16<float, ne>;
+     } else {
+diff --git a/ggml/src/ggml-cuda/fattn-vec.cuh b/ggml/src/ggml-cuda/fattn-vec.cuh
+index 69dd936..7b40d34 100644
+--- a/ggml/src/ggml-cuda/fattn-vec.cuh
++++ b/ggml/src/ggml-cuda/fattn-vec.cuh
+@@ -609,3 +609,15 @@ EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q5_0)
+ EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q5_1)
+ EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q8_0)
+ EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_BF16)
++
++// TurboQuant V cache (TQ3_0/TQ4_0): K = F16/Q8_0 pairings only, compiled in
++// all builds (see ggml_cuda_flash_attn_ext_vec / CMakeLists.txt)
++#define EXTERN_DECL_FATTN_VEC_CASES_TQ(D)                        \
++    extern DECL_FATTN_VEC_CASE(D, GGML_TYPE_F16,  GGML_TYPE_TQ3_0); \
++    extern DECL_FATTN_VEC_CASE(D, GGML_TYPE_Q8_0, GGML_TYPE_TQ3_0); \
++    extern DECL_FATTN_VEC_CASE(D, GGML_TYPE_F16,  GGML_TYPE_TQ4_0); \
++    extern DECL_FATTN_VEC_CASE(D, GGML_TYPE_Q8_0, GGML_TYPE_TQ4_0); \
++
++EXTERN_DECL_FATTN_VEC_CASES_TQ( 64)
++EXTERN_DECL_FATTN_VEC_CASES_TQ(128)
++EXTERN_DECL_FATTN_VEC_CASES_TQ(256)
+diff --git a/ggml/src/ggml-cuda/fattn.cu b/ggml/src/ggml-cuda/fattn.cu
+index d6c501b..239afad 100644
+--- a/ggml/src/ggml-cuda/fattn.cu
++++ b/ggml/src/ggml-cuda/fattn.cu
+@@ -325,6 +325,15 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
+     FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_BF16)
+ #endif // GGML_CUDA_FA_ALL_QUANTS
+ 
++    // TurboQuant V cache (TQ3_0/TQ4_0): compiled in ALL builds, but only for
++    // the K = F16/Q8_0 pairings (K stays high-precision by design — see
++    // suiban/docs/turboquant.md). ggml_cuda_get_best_fattn_kernel rejects any
++    // other K type paired with a TurboQuant V.
++    FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_TQ3_0)
++    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_TQ3_0)
++    FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_TQ4_0)
++    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_TQ4_0)
++
+     GGML_ABORT("fatal error");
+ }
+ 
+@@ -421,11 +430,23 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
+             return BEST_FATTN_KERNEL_NONE;
+     }
+ 
++    if (V->type == GGML_TYPE_TQ3_0 || V->type == GGML_TYPE_TQ4_0) {
++        // TurboQuant V cache: the mixed pair K = F16/Q8_0 with V = TQ3_0/TQ4_0
++        // is supported in ALL builds (vec instances are always compiled and the
++        // K != V restriction below does not apply). Any other K pairing has no
++        // vec instance and must be rejected here so it can never reach the
++        // GGML_ABORT in the vec dispatch — the op then falls back to another
++        // backend instead of crashing.
++        if (K->type != GGML_TYPE_F16 && K->type != GGML_TYPE_Q8_0) {
++            return BEST_FATTN_KERNEL_NONE;
++        }
++    } else {
+ #ifndef GGML_CUDA_FA_ALL_QUANTS
+-    if (K->type != V->type) {
+-        return BEST_FATTN_KERNEL_NONE;
+-    }
++        if (K->type != V->type) {
++            return BEST_FATTN_KERNEL_NONE;
++        }
+ #endif // GGML_CUDA_FA_ALL_QUANTS
++    }
+ 
+     switch (K->type) {
+         case GGML_TYPE_F32:
+diff --git a/ggml/src/ggml-cuda/template-instances/generate_cu_files.py b/ggml/src/ggml-cuda/template-instances/generate_cu_files.py
+index 5950da8..bdd8c0f 100755
+--- a/ggml/src/ggml-cuda/template-instances/generate_cu_files.py
++++ b/ggml/src/ggml-cuda/template-instances/generate_cu_files.py
+@@ -10,6 +10,11 @@ HEAD_SIZES_V_OVERRIDE = {576: 512, 320: 256, 192: 128}
+ 
+ TYPES_KV = ["GGML_TYPE_F16", "GGML_TYPE_Q4_0", "GGML_TYPE_Q4_1", "GGML_TYPE_Q5_0", "GGML_TYPE_Q5_1", "GGML_TYPE_Q8_0", "GGML_TYPE_BF16"]
+ 
++# TurboQuant V-cache types (this fork's TQ3_0/TQ4_0 patchset): V-only, paired
++# exclusively with high-precision K (see fattn.cu support check).
++TYPES_K_FOR_TQ_V = ["GGML_TYPE_F16", "GGML_TYPE_Q8_0"]
++TYPES_V_TQ = ["GGML_TYPE_TQ3_0", "GGML_TYPE_TQ4_0"]
++
+ SOURCE_FATTN_TILE = """// This file has been autogenerated by generate_cu_files.py, do not edit manually.
+ 
+ #include "../fattn-tile.cuh"
+@@ -74,6 +79,11 @@ for type_k in TYPES_KV:
+         with open(f"fattn-vec-instance-{get_short_name(type_k)}-{get_short_name(type_v)}.cu", "w") as f:
+             f.write(SOURCE_FATTN_VEC.format(type_k=type_k, type_v=type_v))
+ 
++for type_k in TYPES_K_FOR_TQ_V:
++    for type_v in TYPES_V_TQ:
++        with open(f"fattn-vec-instance-{get_short_name(type_k)}-{get_short_name(type_v)}.cu", "w") as f:
++            f.write(SOURCE_FATTN_VEC.format(type_k=type_k, type_v=type_v))
++
+ for ncols in [8, 16, 32, 64]:
+     for ncols2 in [1, 2, 4, 8, 16, 32]:
+         if ncols2 > ncols:
+diff --git a/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-f16-tq3_0.cu b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-f16-tq3_0.cu
+new file mode 100644
+--- /dev/null
++++ b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-f16-tq3_0.cu
+@@ -0,0 +1,7 @@
++// This file has been autogenerated by generate_cu_files.py, do not edit manually.
++
++#include "../fattn-vec.cuh"
++
++DECL_FATTN_VEC_CASE( 64, GGML_TYPE_F16, GGML_TYPE_TQ3_0);
++DECL_FATTN_VEC_CASE(128, GGML_TYPE_F16, GGML_TYPE_TQ3_0);
++DECL_FATTN_VEC_CASE(256, GGML_TYPE_F16, GGML_TYPE_TQ3_0);
+diff --git a/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-q8_0-tq3_0.cu b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-q8_0-tq3_0.cu
+new file mode 100644
+--- /dev/null
++++ b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-q8_0-tq3_0.cu
+@@ -0,0 +1,7 @@
++// This file has been autogenerated by generate_cu_files.py, do not edit manually.
++
++#include "../fattn-vec.cuh"
++
++DECL_FATTN_VEC_CASE( 64, GGML_TYPE_Q8_0, GGML_TYPE_TQ3_0);
++DECL_FATTN_VEC_CASE(128, GGML_TYPE_Q8_0, GGML_TYPE_TQ3_0);
++DECL_FATTN_VEC_CASE(256, GGML_TYPE_Q8_0, GGML_TYPE_TQ3_0);
+diff --git a/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-f16-tq4_0.cu b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-f16-tq4_0.cu
+new file mode 100644
+--- /dev/null
++++ b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-f16-tq4_0.cu
+@@ -0,0 +1,7 @@
++// This file has been autogenerated by generate_cu_files.py, do not edit manually.
++
++#include "../fattn-vec.cuh"
++
++DECL_FATTN_VEC_CASE( 64, GGML_TYPE_F16, GGML_TYPE_TQ4_0);
++DECL_FATTN_VEC_CASE(128, GGML_TYPE_F16, GGML_TYPE_TQ4_0);
++DECL_FATTN_VEC_CASE(256, GGML_TYPE_F16, GGML_TYPE_TQ4_0);
+diff --git a/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-q8_0-tq4_0.cu b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-q8_0-tq4_0.cu
+new file mode 100644
+--- /dev/null
++++ b/ggml/src/ggml-cuda/template-instances/fattn-vec-instance-q8_0-tq4_0.cu
+@@ -0,0 +1,7 @@
++// This file has been autogenerated by generate_cu_files.py, do not edit manually.
++
++#include "../fattn-vec.cuh"
++
++DECL_FATTN_VEC_CASE( 64, GGML_TYPE_Q8_0, GGML_TYPE_TQ4_0);
++DECL_FATTN_VEC_CASE(128, GGML_TYPE_Q8_0, GGML_TYPE_TQ4_0);
++DECL_FATTN_VEC_CASE(256, GGML_TYPE_Q8_0, GGML_TYPE_TQ4_0);

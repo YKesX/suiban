@@ -1,0 +1,71 @@
+[project]
+name = "suiban"
+version = "0.1.0"
+description = "bonsai inference and orchestration core: llama-server management, VRAM scheduling, agentic loop, memory and gateways"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Yağızhan Keskin" }]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    # official NVML bindings; provides the `pynvml` module (the old `pynvml` PyPI
+    # package is deprecated in favor of this one)
+    "nvidia-ml-py>=12.0",
+    "psutil>=5.9",
+    "typer>=0.12",
+    "tomli-w>=1.0",
+    "huggingface_hub>=0.23",
+    "readability-lxml>=0.8.4.1",
+]
+
+[project.optional-dependencies]
+# Messaging gateways. Optional: core runs without them.
+#   python-telegram-bot — Telegram long-poll notifications.
+#   qrcode              — render the WhatsApp device-link QR (terminal ASCII; pure
+#                         Python, no Pillow needed for print_ascii).
+#   neonize             — OPTIONAL native WhatsApp Web multi-device backend; if absent a
+#                         stub backend renders a real QR but does not complete a live
+#                         link (link+send unverified against live WhatsApp — see
+#                         docs/gateways.md / KNOWN_ISSUES).
+gateways = ["python-telegram-bot>=21.0", "qrcode>=7.4"]
+
+[project.scripts]
+suiban = "suiban.cli:main"
+
+
+[project.urls]
+Homepage = "https://github.com/YKesX/suiban"
+Repository = "https://github.com/YKesX/suiban"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "hypothesis>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/suiban"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# vendor/ holds the TurboQuant patchset plus a gitignored checkout of the llama.cpp
+# fork (patch target) — not our lint surface.
+extend-exclude = ["vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -1,0 +1,438 @@
+Subject: [PATCH 5/6] ggml-cuda: TurboQuant TQ3_0 / TQ4_0 CUDA core kernels
+
+Target: PrismML-Eng/llama.cpp tag prism-b9596-9fcaed7, after patches 0001-0004.
+
+Clean-room CUDA implementation of the TurboQuant KV-cache types (no code from
+the unlicensed community CUDA gist):
+
+- turboquant.cuh (new): device-side codebooks (identical constants to the CPU
+  reference in ggml-quants.c), sign mask (bit-packed form of the golden-ratio
+  hash table), scalar per-thread block quantizer (RMS -> sign flips + WHT
+  butterfly -> boundary scan, numerically identical algorithm to the CPU
+  reference), per-element closed-form dequantizer
+  y[j] = d/sqrt(32) * sign[j] * sum_k (-1)^popc(j&k) * C[idx_k]
+  (equal to the inverse-RHT butterfly; validated host-side by
+  vendor/run_kernel_tests.py stage 4), and bit-exact code unpack helpers.
+- convert.cu: dequantize-rows kernels (contiguous + non-contiguous), one warp
+  per 32-block via a 5-stage __shfl_xor_sync Walsh-Hadamard butterfly; wired
+  into to_fp16 / to_fp32 / to_fp16_nc / to_fp32_nc dispatch. The fp16 paths
+  are what flash attention's prefill (MMA/tile) route uses for a quantized V.
+- set-rows.cu: KV-write path — f32 -> TQ3_0/TQ4_0 rows via set_rows_cuda_quant
+  (block-32 layout byte-identical to the CPU kernels).
+- ggml-cuda.cu: allow TQ3_0/TQ4_0 dst in GGML_OP_SET_ROWS supports_op.
+
+Not wired (documented in suiban/vendor/README.md): GGML_OP_CPY f32<->TQ (this
+fork writes the KV cache through SET_ROWS; unsupported ops fall back to the
+CPU backend, which has full TQ support) and the bf16 convert paths.
+---
+diff --git a/ggml/src/ggml-cuda/convert.cu b/ggml/src/ggml-cuda/convert.cu
+index 3f12184..ea975e9 100644
+--- a/ggml/src/ggml-cuda/convert.cu
++++ b/ggml/src/ggml-cuda/convert.cu
+@@ -1,5 +1,6 @@
+ #include "convert.cuh"
+ #include "dequantize.cuh"
++#include "turboquant.cuh"
+ 
+ #include <cstdint>
+ 
+@@ -656,6 +657,81 @@ static void dequantize_row_nvfp4_cuda(
+     const int nb = k / QK_NVFP4;
+     dequantize_block_nvfp4<<<nb, 32, 0, stream>>>(vx, y, k);
+ }
++// TurboQuant TQ3_0/TQ4_0 (see turboquant.cuh): one warp per 32-value block.
++// Lane j holds the centroid of code j; a 5-stage __shfl_xor_sync butterfly
++// computes the inverse randomized Hadamard transform across the warp, then
++// lane j writes output element j. Supports non-contiguous input via block
++// strides s01/s02/s03 (same contract as dequantize_block_cuda); the output is
++// always dense.
++template <typename dst_t, ggml_type type>
++static __global__ void dequantize_block_tq(const void * __restrict__ vx, dst_t * __restrict__ y,
++        const int64_t nblk0, const int64_t ne01, const int64_t ne02, const int64_t ne03,
++        const int64_t s01, const int64_t s02, const int64_t s03) {
++    const int64_t nblk_total = nblk0*ne01*ne02*ne03;
++    const int lane = threadIdx.x;
++
++    for (int64_t w = (int64_t) blockIdx.x*blockDim.y + threadIdx.y; w < nblk_total;
++         w += (int64_t) gridDim.x*blockDim.y) {
++        int64_t t = w;
++        const int64_t i00b = t % nblk0; t /= nblk0;
++        const int64_t i01  = t % ne01;  t /= ne01;
++        const int64_t i02  = t % ne02;
++        const int64_t i03  = t / ne02;
++
++        const int64_t ib = i03*s03 + i02*s02 + i01*s01 + i00b;
++
++        float v;
++        float d;
++        if constexpr (type == GGML_TYPE_TQ3_0) {
++            const block_tq3_0 * x = (const block_tq3_0 *) vx + ib;
++            v = tq3_0_centroids[ggml_cuda_tq3_0_get_code(x->qs, lane)];
++            d = __half2float(x->d);
++        } else {
++            static_assert(type == GGML_TYPE_TQ3_0 || type == GGML_TYPE_TQ4_0, "bad type");
++            const block_tq4_0 * x = (const block_tq4_0 *) vx + ib;
++            v = tq4_0_centroids[ggml_cuda_tq4_0_get_code(x->qs, lane)];
++            d = __half2float(x->d);
++        }
++
++        // warp-parallel Walsh-Hadamard butterfly (natural order), equivalent to
++        // the CPU reference's sequential butterfly
++#pragma unroll
++        for (int m = 1; m < QK_TQ; m <<= 1) {
++            const float other = __shfl_xor_sync(0xFFFFFFFF, v, m, QK_TQ);
++            v = (lane & m) ? (other - v) : (v + other);
++        }
++        v *= TQ_RSQRT32 * ggml_cuda_tq_sign(lane) * d;
++
++        const int64_t iy = (((i03*ne02 + i02)*ne01 + i01)*nblk0 + i00b)*QK_TQ + lane;
++        y[iy] = ggml_cuda_cast<dst_t>(v);
++    }
++}
++
++template <typename dst_t, ggml_type type>
++static void dequantize_tq_cuda(const void * vx, dst_t * y,
++        const int64_t ne00, const int64_t ne01, const int64_t ne02, const int64_t ne03,
++        const int64_t s01, const int64_t s02, const int64_t s03, cudaStream_t stream) {
++    GGML_ASSERT(ne00 % QK_TQ == 0);
++    const int64_t nblk0      = ne00 / QK_TQ;
++    const int64_t nblk_total = nblk0*ne01*ne02*ne03;
++    constexpr int warps_per_cta = 4;
++    const dim3 block_dims(QK_TQ, warps_per_cta, 1);
++    const int64_t n_cta = (nblk_total + warps_per_cta - 1) / warps_per_cta;
++    const dim3 num_blocks((unsigned int) std::min<int64_t>(n_cta, 1 << 20), 1, 1);
++    dequantize_block_tq<dst_t, type><<<num_blocks, block_dims, 0, stream>>>
++        (vx, y, nblk0, ne01, ne02, ne03, s01, s02, s03);
++}
++
++template <typename dst_t>
++static void dequantize_row_tq3_0_cuda(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
++    dequantize_tq_cuda<dst_t, GGML_TYPE_TQ3_0>(vx, y, k, 1, 1, 1, k/QK_TQ, k/QK_TQ, k/QK_TQ, stream);
++}
++
++template <typename dst_t>
++static void dequantize_row_tq4_0_cuda(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
++    dequantize_tq_cuda<dst_t, GGML_TYPE_TQ4_0>(vx, y, k, 1, 1, 1, k/QK_TQ, k/QK_TQ, k/QK_TQ, stream);
++}
++
+ template <typename src_t, typename dst_t>
+ static __global__ void convert_unary(
+         const void * __restrict__ vx, dst_t * __restrict__ y, const int64_t ne00, const int64_t ne01,
+@@ -760,6 +836,10 @@ to_fp16_cuda_t ggml_get_to_fp16_cuda(ggml_type type) {
+             return dequantize_row_mxfp4_cuda;
+         case GGML_TYPE_NVFP4:
+             return dequantize_row_nvfp4_cuda;
++        case GGML_TYPE_TQ3_0:
++            return dequantize_row_tq3_0_cuda;
++        case GGML_TYPE_TQ4_0:
++            return dequantize_row_tq4_0_cuda;
+         case GGML_TYPE_F32:
+             return convert_unary_cont_cuda<float>;
+         case GGML_TYPE_BF16:
+@@ -817,6 +897,10 @@ to_fp32_cuda_t ggml_get_to_fp32_cuda(ggml_type type) {
+             return dequantize_row_mxfp4_cuda;
+         case GGML_TYPE_NVFP4:
+             return dequantize_row_nvfp4_cuda;
++        case GGML_TYPE_TQ3_0:
++            return dequantize_row_tq3_0_cuda;
++        case GGML_TYPE_TQ4_0:
++            return dequantize_row_tq4_0_cuda;
+         case GGML_TYPE_F16:
+             return convert_unary_cont_cuda<half>;
+         case GGML_TYPE_BF16:
+@@ -844,6 +928,10 @@ to_fp16_nc_cuda_t ggml_get_to_fp16_nc_cuda(ggml_type type) {
+             return dequantize_block_cuda<QK5_1, QR5_1, dequantize_q5_1>;
+         case GGML_TYPE_Q8_0:
+             return dequantize_block_cuda<QK8_0, QR8_0, dequantize_q8_0>;
++        case GGML_TYPE_TQ3_0:
++            return dequantize_tq_cuda<half, GGML_TYPE_TQ3_0>;
++        case GGML_TYPE_TQ4_0:
++            return dequantize_tq_cuda<half, GGML_TYPE_TQ4_0>;
+         case GGML_TYPE_BF16:
+             return convert_unary_cuda<nv_bfloat16>;
+         default:
+@@ -894,6 +982,10 @@ to_fp32_nc_cuda_t ggml_get_to_fp32_nc_cuda(ggml_type type) {
+             return dequantize_block_cuda<QK5_1, QR5_1, dequantize_q5_1>;
+         case GGML_TYPE_Q8_0:
+             return dequantize_block_cuda<QK8_0, QR8_0, dequantize_q8_0>;
++        case GGML_TYPE_TQ3_0:
++            return dequantize_tq_cuda<float, GGML_TYPE_TQ3_0>;
++        case GGML_TYPE_TQ4_0:
++            return dequantize_tq_cuda<float, GGML_TYPE_TQ4_0>;
+         case GGML_TYPE_BF16:
+             return convert_unary_cuda<nv_bfloat16, float>;
+         default:
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 13e1b8a..9d7370d 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -5216,7 +5216,8 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
+             {
+                 return (op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_F16 || op->type == GGML_TYPE_BF16 ||
+                        op->type == GGML_TYPE_Q4_0 || op->type == GGML_TYPE_Q4_1 || op->type == GGML_TYPE_Q5_0 ||
+-                       op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL) &&
++                       op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL ||
++                       op->type == GGML_TYPE_TQ3_0 || op->type == GGML_TYPE_TQ4_0) &&
+                        op->src[0]->type == GGML_TYPE_F32 &&
+                        (op->src[1]->type == GGML_TYPE_I64 || op->src[1]->type == GGML_TYPE_I32);
+             } break;
+diff --git a/ggml/src/ggml-cuda/set-rows.cu b/ggml/src/ggml-cuda/set-rows.cu
+index 4125103..ac79386 100644
+--- a/ggml/src/ggml-cuda/set-rows.cu
++++ b/ggml/src/ggml-cuda/set-rows.cu
+@@ -1,5 +1,6 @@
+ #include "set-rows.cuh"
+ #include "cpy-utils.cuh"
++#include "turboquant.cuh"
+ 
+ typedef void (*set_rows_kernel_t)(const char * src, char * dst);
+ 
+@@ -383,6 +384,26 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
+             nb1, nb2, nb3,
+             stream
+         );
++    } else if (dst->type == GGML_TYPE_TQ3_0) {
++        set_rows_cuda_quant<idx_t, block_tq3_0, QK_TQ3_0, quantize_f32_tq3_0_block>(
++            src0_d, src1_d, (block_tq3_0*)dst->data,
++            ne00, ne01, ne02, ne03,
++            ne10, ne11, ne12, ne13,
++            nb01, nb02, nb03,
++            nb10, nb11, nb12,
++            nb1, nb2, nb3,
++            stream
++        );
++    } else if (dst->type == GGML_TYPE_TQ4_0) {
++        set_rows_cuda_quant<idx_t, block_tq4_0, QK_TQ4_0, quantize_f32_tq4_0_block>(
++            src0_d, src1_d, (block_tq4_0*)dst->data,
++            ne00, ne01, ne02, ne03,
++            ne10, ne11, ne12, ne13,
++            nb01, nb02, nb03,
++            nb10, nb11, nb12,
++            nb1, nb2, nb3,
++            stream
++        );
+     } else {
+         GGML_ABORT("unsupported type %s", ggml_type_name(dst->type));
+     }
+diff --git a/ggml/src/ggml-cuda/turboquant.cuh b/ggml/src/ggml-cuda/turboquant.cuh
+new file mode 100644
+--- /dev/null
++++ b/ggml/src/ggml-cuda/turboquant.cuh
+@@ -0,0 +1,217 @@
++#pragma once
++
++// TurboQuant TQ3_0 / TQ4_0 (arXiv:2504.19874, Zandieh et al.) — CUDA device-side helpers.
++//
++// KV-cache oriented block quantization, 32 values per block:
++//   RMS scale (fp16) -> deterministic sign flips + Walsh-Hadamard transform
++//   (randomized Hadamard transform) -> per-coordinate Lloyd-Max scalar
++//   quantization against an N(0,1) codebook.
++//
++// Clean-room implementation: written against the CPU reference kernels in
++// ggml/src/ggml-quants.c (this patchset) and the existing ggml-cuda idioms for
++// quantized KV handling (cpy-utils.cuh, fattn-common.cuh). No code from the
++// unlicensed community CUDA gist is used.
++//
++// Codebook constants MUST stay in sync with ggml/src/ggml-quants.c and
++// suiban/vendor/codebooks/tq_codebooks.h (single source of truth: the
++// generator suiban/vendor/codebooks/generate.py).
++
++#include "common.cuh"
++
++#define QK_TQ 32 // block size shared by TQ3_0 and TQ4_0 (== QK_TQ3_0 == QK_TQ4_0)
++
++// 1/sqrt(32): normalization of the Walsh-Hadamard butterfly
++#define TQ_RSQRT32 0.17677669529663688f
++
++// Deterministic sign-flip pattern for the randomized Hadamard transform, as a
++// bitmask: bit j set -> sign[j] = -1. Identical to the CPU reference table
++// TQ_RHT_SIGNS (generated from the golden-ratio hash
++// sign[i] = ((i * 0x9E3779B9) >> 31) ? -1 : +1).
++#define TQ_RHT_SIGN_MASK 0x696B4B4Au
++
++static __device__ __forceinline__ float ggml_cuda_tq_sign(const int j) {
++    return (TQ_RHT_SIGN_MASK >> j) & 1u ? -1.0f : 1.0f;
++}
++
++// Lloyd-Max 8-level codebook centroids for N(0,1) (theoretical MSE 0.034548)
++static const __device__ float tq3_0_centroids[8] = {
++    -2.1519f, -1.3439f, -0.7560f, -0.2451f,
++    +0.2451f, +0.7560f, +1.3439f, +2.1519f,
++};
++
++// Decision boundaries (midpoints between adjacent centroids)
++static const __device__ float tq3_0_boundaries[7] = {
++    -1.7479f, -1.0500f, -0.5005f, +0.0000f,
++    +0.5005f, +1.0500f, +1.7479f,
++};
++
++// Lloyd-Max 16-level codebook centroids for N(0,1) (theoretical MSE 0.009501)
++static const __device__ float tq4_0_centroids[16] = {
++    -2.7325896f, -2.0690172f, -1.6180464f, -1.2562312f,
++    -0.9423405f, -0.6567591f, -0.3880483f, -0.1283950f,
++    +0.1283950f, +0.3880483f, +0.6567591f, +0.9423405f,
++    +1.2562312f, +1.6180464f, +2.0690172f, +2.7325896f,
++};
++
++// Decision boundaries (midpoints between adjacent centroids)
++static const __device__ float tq4_0_boundaries[15] = {
++    -2.4008034f, -1.8435318f, -1.4371388f, -1.0992859f,
++    -0.7995498f, -0.5224037f, -0.2582217f, +0.0000000f,
++    +0.2582217f, +0.5224037f, +0.7995498f, +1.0992859f,
++    +1.4371388f, +1.8435318f, +2.4008034f,
++};
++
++// In-place 5-stage Walsh-Hadamard butterfly (natural order), identical to the
++// CPU reference tq_rht_forward/tq_rht_inverse core. Involutive up to the
++// 1/sqrt(32) normalization, which callers apply themselves.
++static __device__ __forceinline__ void ggml_cuda_tq_wht32(float * v) {
++#pragma unroll
++    for (int step = 1; step < QK_TQ; step <<= 1) {
++#pragma unroll
++        for (int i = 0; i < QK_TQ; i += step << 1) {
++#pragma unroll
++            for (int j = i; j < i + step; j++) {
++                const float a = v[j];
++                const float b = v[j + step];
++                v[j]        = a + b;
++                v[j + step] = a - b;
++            }
++        }
++    }
++}
++
++// Extract the 3-bit code of element k (0..31) from a tq3_0 block's packed qs.
++// Bit layout identical to the CPU reference pack/unpack (groups of 8 indices
++// -> 3 bytes); 3-bit fields at bit offsets 6 and 7 within a byte straddle
++// into the next byte of the same 3-byte group, never out of bounds.
++static __device__ __forceinline__ int ggml_cuda_tq3_0_get_code(const uint8_t * qs, const int k) {
++    const uint8_t * qp  = qs + 3*(k >> 3);
++    const int       bit = 3*(k & 7);
++    int v = qp[bit >> 3] >> (bit & 7);
++    if ((bit & 7) > 5) {
++        v |= qp[(bit >> 3) + 1] << (8 - (bit & 7));
++    }
++    return v & 7;
++}
++
++// Extract the 4-bit code of element k (0..31) from a tq4_0 block's packed qs
++// (2 codes per byte, even index in the low nibble — same as the CPU reference).
++static __device__ __forceinline__ int ggml_cuda_tq4_0_get_code(const uint8_t * qs, const int k) {
++    return (qs[k >> 1] >> (4*(k & 1))) & 0xF;
++}
++
++// Quantize one 32-value block: RMS scale -> sign flips + WHT -> nearest
++// centroid (linear boundary scan, identical tie behavior to the CPU
++// reference). nlevels is 8 (TQ3_0) or 16 (TQ4_0).
++// Returns the RMS scale; indices[] receives QK_TQ codebook indices.
++static __device__ float ggml_cuda_tq_quantize_block(
++        const float * __restrict__ x, uint8_t * __restrict__ indices,
++        const float * boundaries, const int nlevels) {
++    float sum_sq = 0.0f;
++#pragma unroll
++    for (int j = 0; j < QK_TQ; j++) {
++        sum_sq += x[j]*x[j];
++    }
++    const float rms = sqrtf(sum_sq / QK_TQ);
++
++    if (rms < 1e-10f) {
++        // all-zero (or vanishing) block: d = 0 so dequantization returns exact
++        // zeros instead of scaled centroid noise (same as the CPU reference)
++#pragma unroll
++        for (int j = 0; j < QK_TQ; j++) {
++            indices[j] = 0;
++        }
++        return 0.0f;
++    }
++
++    float v[QK_TQ];
++    const float inv_rms = 1.0f / rms;
++#pragma unroll
++    for (int j = 0; j < QK_TQ; j++) {
++        v[j] = x[j] * inv_rms * ggml_cuda_tq_sign(j);
++    }
++
++    ggml_cuda_tq_wht32(v);
++
++#pragma unroll
++    for (int j = 0; j < QK_TQ; j++) {
++        const float r = v[j] * TQ_RSQRT32;
++        uint8_t idx = 0;
++        for (int b = 0; b < nlevels - 1; b++) {
++            if (r > boundaries[b]) {
++                idx = (uint8_t) (b + 1);
++            }
++        }
++        indices[j] = idx;
++    }
++
++    return rms;
++}
++
++// f32 -> tq3_0, one block per thread (set-rows KV-write idiom, cpy-utils style)
++static __device__ void quantize_f32_tq3_0_block(const float * __restrict__ x, block_tq3_0 * __restrict__ y) {
++    uint8_t indices[QK_TQ];
++    const float rms = ggml_cuda_tq_quantize_block(x, indices, tq3_0_boundaries, 8);
++    y->d = __float2half(rms);
++
++    // pack 3-bit indices (groups of 8 indices -> 3 bytes), same as CPU reference
++#pragma unroll
++    for (int g = 0; g < 4; g++) {
++        const uint8_t * idx = indices + g*8;
++        uint8_t * qp = y->qs + g*3;
++        qp[0] = (uint8_t) ((idx[0])      | (idx[1] << 3) | (idx[2] << 6));
++        qp[1] = (uint8_t) ((idx[2] >> 2) | (idx[3] << 1) | (idx[4] << 4) | (idx[5] << 7));
++        qp[2] = (uint8_t) ((idx[5] >> 1) | (idx[6] << 2) | (idx[7] << 5));
++    }
++}
++
++// f32 -> tq4_0, one block per thread (set-rows KV-write idiom, cpy-utils style)
++static __device__ void quantize_f32_tq4_0_block(const float * __restrict__ x, block_tq4_0 * __restrict__ y) {
++    uint8_t indices[QK_TQ];
++    const float rms = ggml_cuda_tq_quantize_block(x, indices, tq4_0_boundaries, 16);
++    y->d = __float2half(rms);
++
++    // pack 4-bit indices (2 per byte: even index in the low nibble)
++#pragma unroll
++    for (int j = 0; j < QK_TQ/2; j++) {
++        y->qs[j] = (uint8_t) (indices[2*j] | (indices[2*j + 1] << 4));
++    }
++}
++
++// Dequantize output element j (0..31) of a block given the 32 centroid values
++// of that block. Uses the closed form of the inverse RHT:
++//   y[j] = d * (1/sqrt(32)) * sign[j] * sum_k (-1)^popc(j&k) * c[k]
++// which is exactly the CPU reference's WHT butterfly + sign + rescale, computed
++// per element so that fattn's per-thread dequantize_V contract can be met.
++// dn must be d * TQ_RSQRT32.
++static __device__ __forceinline__ float ggml_cuda_tq_dequant_elem(
++        const float * __restrict__ c, const int j, const float dn) {
++    float sum = 0.0f;
++#pragma unroll
++    for (int k = 0; k < QK_TQ; k++) {
++        sum += (__popc(j & k) & 1) ? -c[k] : c[k];
++    }
++    return sum * ggml_cuda_tq_sign(j) * dn;
++}
++
++// Load a tq3_0 block's codes as centroid values c[0..31].
++static __device__ __forceinline__ void ggml_cuda_tq3_0_block_centroids(
++        const block_tq3_0 * __restrict__ b, float * __restrict__ c) {
++    uint8_t qs[QK_TQ3_0*3/8];
++    ggml_cuda_memcpy_1<QK_TQ3_0*3/8, 2>(qs, b->qs);
++#pragma unroll
++    for (int k = 0; k < QK_TQ; k++) {
++        c[k] = tq3_0_centroids[ggml_cuda_tq3_0_get_code(qs, k)];
++    }
++}
++
++// Load a tq4_0 block's codes as centroid values c[0..31].
++static __device__ __forceinline__ void ggml_cuda_tq4_0_block_centroids(
++        const block_tq4_0 * __restrict__ b, float * __restrict__ c) {
++    uint8_t qs[QK_TQ4_0/2];
++    ggml_cuda_memcpy_1<QK_TQ4_0/2, 2>(qs, b->qs);
++#pragma unroll
++    for (int k = 0; k < QK_TQ; k++) {
++        c[k] = tq4_0_centroids[ggml_cuda_tq4_0_get_code(qs, k)];
++    }
++}

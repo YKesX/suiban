@@ -1,0 +1,19 @@
+Subject: [PATCH 3/4] common: accept tq3_0 / tq4_0 as KV cache types
+
+Registers the TurboQuant types in kv_cache_types so llama-server and other
+common-based tools accept --cache-type-k/--cache-type-v tq3_0|tq4_0.
+suiban only ever sets them for V (K stays q8_0; see docs/turboquant.md).
+---
+diff --git a/common/arg.cpp b/common/arg.cpp
+index 6fc30ab..f4e0208 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -397,6 +397,8 @@ const std::vector<ggml_type> kv_cache_types = {
+     GGML_TYPE_IQ4_NL,
+     GGML_TYPE_Q5_0,
+     GGML_TYPE_Q5_1,
++    GGML_TYPE_TQ3_0,
++    GGML_TYPE_TQ4_0,
+ };
+ 
+ static ggml_type kv_cache_type_from_str(const std::string & s) {

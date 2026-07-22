@@ -1,0 +1,117 @@
+{
+  "description": "Three malformed calls: two repair prompts (the whole per-run budget), the third is abandoned; the run still completes with an answer.",
+  "max_iterations": 8,
+  "responses": [
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "not json {{"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_2",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "{\"bogus\": true}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_3",
+                "type": "function",
+                "function": {
+                  "name": "step",
+                  "arguments": "still not json"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    },
+    {
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "could not use the tool; answering from context"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5
+      }
+    }
+  ],
+  "expect": {
+    "final_text": "could not use the tool; answering from context",
+    "finish_reason": "stop",
+    "tool_result_statuses": [
+      "error",
+      "error",
+      "error"
+    ],
+    "executed_notes": [],
+    "tool_stats": {
+      "tool_calls": 3,
+      "malformed_calls": 3,
+      "repaired_calls": 0,
+      "abandoned_calls": 1
+    },
+    "usage_has_malformed_fields": true
+  }
+}

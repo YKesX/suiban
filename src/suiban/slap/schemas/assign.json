@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slap.dev/schemas/assign.json",
+  "title": "SLAP assign",
+  "description": "Orchestrator delegates a bounded task to a worker.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "SLAP"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "const": "assign"
+    },
+    "parent_task": {
+      "type": "string"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base_revision": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "expected_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "system_prompt": {
+      "type": "string",
+      "description": "Volatile per-agent system prompt the orchestrator generates for THIS task; not persisted, discarded when the agent finishes."
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maximum_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximum_rounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximum_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximum_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "protocol",
+    "version",
+    "message_id",
+    "task_id",
+    "operation",
+    "role",
+    "goal"
+  ],
+  "additionalProperties": false
+}

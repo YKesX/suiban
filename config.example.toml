@@ -1,0 +1,146 @@
+# suiban configuration — EXAMPLE.
+#
+# Real config lives at ~/.bonsai/config.toml (created automatically on first run with
+# these defaults). Never put secrets in the repo copy; the real file may hold gateway
+# tokens (write-only over the HTTP API — GET /v1/settings only ever shows token_set).
+#
+# Settings changed over HTTP (PATCH /v1/settings) are STAGED and only take effect after
+# POST /v1/system/apply — never mid-run.
+
+# Model quant family: "ternary" (Q2_0, default) or "1bit" (Q1_0).
+# On GPUs <= 12 GB the effective 27B family degrades ternary -> 1bit with a notice;
+# your configured value is preserved and reported alongside the effective one.
+quant_family = "ternary"
+
+[kv]
+# TurboQuant KV-cache quantization (K=q8_0, V=TQ4_0 by default).
+# turboquant_enabled=false -> K/V = q8_0/q8_0.
+# If the installed binary lacks TurboQuant kernels or flash attention is unavailable,
+# suiban falls back automatically (q8_0/q8_0, then f16/f16) and surfaces a notice —
+# it never crashes and never degrades silently.
+# KV settings map to llama-server launch flags: changes take effect at the NEXT
+# RESTART (/v1/system/apply reports them under requires_restart).
+turboquant_enabled = true
+# "recommended" = V:TQ4_0 (4.5 bpw) · "aggressive" = V:TQ3_0 (3.5 bpw) · "off" = q8_0/q8_0
+preset = "recommended"
+
+# DSpark speculative-decoding drafter for the 27B (CUDA only, ~1.8 GB VRAM). Opt-in;
+# a launch flag like [kv], so it also takes effect at the next restart.
+dspark_enabled = false
+
+# Optional effort override for requests that do not specify one:
+# low | mid | high | xhigh | max. Unset (the default) keeps each mode's own default
+# (chat: mid; code/ultra/deep_research: high); setting it overrides them ALL.
+# effort_default = "mid"
+
+[loadout]
+# Loadout is planned at run start and never changes mid-run.
+# Preferred number of worker slots (the planner degrades honestly when VRAM is short:
+# 2x8B -> 8B+4B -> 2x4B -> 1x4B -> 1x1.7B -> none/sequential).
+prefer_workers = 2
+worker_ctx = 16384
+orchestrator_ctx = 32768
+
+[browse]
+# Tier-2 browsing (sandboxed Playwright, no credentials). Requires a resident 27B.
+tier2_enabled = true
+
+[chat]
+# Auto-compression (api.md 2026-07-22b): fold older turns into a rolling summary at
+# ~70% of the slot context so long conversations stay in context. On by default; set
+# false to keep the full verbatim history and never compress.
+auto_compress = true
+
+[runtime]
+# Lazy / keep-alive model residency (api.md 2026-07-22c, ollama-style). suiban starts
+# with NO models resident; the planned loadout warms on the first inference request and
+# unloads after keep_alive idle. keep_alive: "24/7"/"0"/"always" stays hot forever; a
+# positive minutes value (e.g. 5 or "5") unloads after that many idle minutes. Read live
+# by the idle reaper — an applied change takes effect at the next idle moment, no restart.
+# The loadout is NEVER unloaded mid-generation.
+keep_alive = "5"
+
+[slap]
+# SLAP agent-protocol coordination for Ultra (api.md 2026-07-22c). On by default: Ultra
+# coordinates its sub-agents with SLAP and /v1/slap/trace serves the validated transcript.
+# Set false to route Ultra through the plain structured-dict dispatch path (no SLAP
+# messages recorded; /v1/slap still serves the schema, but /v1/slap/trace is empty).
+enabled = true
+
+# External OpenAI-compatible inference providers (api.md §11). Enabled providers are
+# polled for their model list and appear in /v1/models as "<name>/<model>"; chat can
+# route to them (mode "chat" only). suiban never manages their lifecycle or VRAM.
+# `name` prefixes model ids: letters/digits/dot/dash/underscore, no "/".
+[[providers]]
+name = "ollama"
+# kind "ollama" presets base_url http://127.0.0.1:11434 when left empty (keyless);
+# kind "openai" is any generic OpenAI-compatible endpoint.
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+enabled = false
+# api_key = "..."   # openai-kind endpoints; set ONLY in ~/.bonsai/config.toml,
+#                   # never in a repo file (write-only over HTTP: api_key_set).
+
+[search]
+# Web search for deep research's gather stage (api.md §11):
+# "duckduckgo" (keyless default, best-effort HTML scrape — honestly fragile) ·
+# "searxng" (base_url required, your instance) · "brave" · "tavily" · "serper"
+# (each needs api_key). Test with POST /v1/system/search_test.
+provider = "duckduckgo"
+base_url = ""
+# api_key = "..."   # set ONLY in ~/.bonsai/config.toml, never in a repo file.
+
+# MCP stdio servers (api.md §8, additive 2026-07-21d). suiban spawns each enabled
+# server as a subprocess and speaks MCP (JSON-RPC over stdio); its tools appear to
+# the model as "mcp_<name>_<tool>" in chat/code sessions. `name` is kebab-case.
+# Changes take effect at the NEXT RESTART (requires_restart, like gateways).
+# A server that fails to start is a notice (mcp_server_failed), never a crash.
+# [[mcp_servers]]
+# name = "filesystem"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allow"]
+# enabled = false
+
+# Built-in MCP connectors selected from the catalog (api.md 2026-07-22c). Each entry
+# references a catalog `id` and toggles it on/off — distinct from the custom stdio
+# servers in [[mcp_servers]] above. Browse the catalog at GET /v1/mcp/connectors
+# (ids: filesystem, git, fetch, memory, everything, sequential-thinking, time). An
+# enabled connector wires into the SAME manager as a custom server. PATCH replaces the
+# whole list; commits at the next idle moment (pending_until_idle). Empty by default.
+# [[mcp_connectors]]
+# id = "git"
+# enabled = false
+
+[gateways.telegram]
+enabled = false
+# token = "..."  # set ONLY in ~/.bonsai/config.toml, never in a repo file.
+# Inbound authorization (default DENY). A chat must pair by sending "/pair <code>" to
+# the bot with the one-time code printed to the SERVER console at gateway start (never
+# sent over Telegram); paired chat ids are appended here automatically.
+require_pairing = true
+allowed_chat_ids = []
+rate_limit_per_min = 20   # per-chat message cap per minute (0 disables the limit)
+
+[gateways.whatsapp]
+# QR device-linked (changed 2026-07-22b): links via the WhatsApp Web multi-device
+# protocol — enable, then scan the QR from GET /v1/gateways/whatsapp/qr. Outbound-only
+# notification pings (research completions, scheduled-run results). No Cloud-API token:
+# the linked device session lives under ~/.bonsai/whatsapp/, never a repo. Inbound relay
+# is TODO(v1.2); link+send is unverified against live WhatsApp (see KNOWN_ISSUES.md).
+enabled = false
+# linked  = false        # managed by suiban: set once a device is linked / unlinked.
+# to_number = ""         # recipient in international format, e.g. "15551234567"
+
+[server]
+# Loopback bind by default (no auth — the zero-friction local default). If you change
+# host to a NON-loopback address (e.g. "0.0.0.0"), suiban auto-generates a write-only
+# server.auth_token on first such bind (printed to the console once, stored only in
+# ~/.bonsai/config.toml) and then REQUIRES `Authorization: Bearer <token>` on every
+# route except GET /v1/system/health. Loopback binds stay open.
+host = "127.0.0.1"
+port = 8686
+# remote_agentic: reserved (api.md 2026-07-22). When true a gateway request MAY use
+# code/ultra — NOT yet honored in v1; gateways stay pinned to chat regardless. Default
+# off. Do not enable a remote channel to the shell.
+remote_agentic = false
+# auth_token is write-only and machine-generated — never put it in a repo file.
