@@ -180,6 +180,35 @@ class MemoryService:
             self.files.delete_state(Path(entry.title).stem)
         self.store.delete_entry(entry_id)
 
+    def delete_state_file(self, name: str) -> None:
+        """Delete ONE bounded state file (DELETE /v1/memory/state/{name}).
+
+        `name` must be a bare filename from the known set; anything else is a 404 so
+        traversal strings can never name a path. Identity files (identity.md and the
+        client overlays) are never deletable over HTTP — the same protection PUT gives
+        their contents. The FTS mirror entry is dropped alongside the file."""
+        known = {f.name for f in self.files.all_files()}
+        if name not in known:
+            raise BonsaiError(
+                404,
+                f"no such state file: {name!r} (known: {', '.join(sorted(known))})",
+                code="state_file_unknown",
+            )
+        if self.files.is_identity_file(name):
+            raise BonsaiError(
+                400,
+                f"{name} is an identity file and is never deletable over HTTP; "
+                f"clear its contents via PUT /v1/memory/state/{name} instead",
+                code="identity_read_only",
+            )
+        self.files.delete_state(Path(name).stem)
+        self.store.delete_entry(_mirror_id("state", name))
+
+    def delete_session(self, session_id: str) -> None:
+        """Delete an archived session/chat (DELETE /v1/memory/sessions/{id})."""
+        if not self.store.delete_session(session_id):
+            raise BonsaiError(404, f"no such session: {session_id}", code="session_not_found")
+
     # -- model-driven writes (27B reflection only) --------------------------
     def model_write_memory(
         self,

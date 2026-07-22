@@ -211,6 +211,10 @@ MemoryEntry: `{ "id": "mem_...", "layer": "identity"|"state"|"archive", "title",
   2026-07-21b; human editing of `identity.md`, the client overlays and state files over
   HTTP; 400 `state_file_too_large` above `max_bytes`, 404 for unknown names; no new
   files are creatable through this route)
+- `DELETE /v1/memory/state/{name}` → 204 (additive 2026-07-22d; removes one bounded state
+  file and its FTS mirror; 404 `state_file_unknown` for names outside the known set; 400
+  `identity_read_only` for `identity.md` and the client overlays, which are never
+  deletable over HTTP)
 - `GET /v1/memory/sessions?q=&mode=&limit=&offset=&project_id=` → `{ "sessions": [ { "id",
   "title", "mode", "project_id", "started_at", "ended_at", "message_count" } ] }` (`q`
   searches FTS5 archive; `mode`=`chat`|`code` filters, additive 2026-07-22b, so dai's
@@ -218,6 +222,9 @@ MemoryEntry: `{ "id": "mem_...", "layer": "identity"|"state"|"archive", "title",
   the utility model after the first exchange.
 - `GET /v1/memory/sessions/{id}` → `{ "session": {...}, "messages": [ { "role",
   "content", "created_at" } ] }`; powers session restore/resume in dai/sentei.
+- `DELETE /v1/memory/sessions/{id}` → 204 (additive 2026-07-22d; deletes an archived
+  session/chat and its transcript, keeping the FTS index in step; 404 `session_not_found`
+  for an unknown id). Powers "remove chat" in dai's recents and memory browser.
 - `POST /v1/memory/sessions/import` (additive 2026-07-22b) `{ "provider":
   "openai"|"claude"|"claude-code"|"generic", "data": <export payload>, "mode":
   "chat"|"code"?, "compress": bool? }` → `{ "imported": [ { "id", "title",
@@ -460,3 +467,9 @@ single-use and command-bound; there is no request-level confirm field.
   <token>` → 401 `unauthorized` otherwise; loopback binds stay open (unchanged
   default). `GET /v1/system` gains `security: { auth_required, remote_agentic,
   telegram_paired }`. All additive; loopback default behavior is unchanged.
+- **v1, additive (2026-07-22d)**: two DELETE routes for manual cleanup from dai/sentei:
+  `DELETE /v1/memory/sessions/{id}` (remove an archived chat and its transcript; 404
+  `session_not_found`) and `DELETE /v1/memory/state/{name}` (remove a bounded state file;
+  404 `state_file_unknown`, 400 `identity_read_only` for `identity.md` and the client
+  overlays). New routes only; no existing shape changed. Per-entry `DELETE /v1/memory/{id}`
+  was already in v1.

@@ -84,6 +84,15 @@ async def memory_state_update(request: Request, name: str) -> dict:
     return memory.update_state_file(name, body.content).as_dict()
 
 
+@router.delete("/v1/memory/state/{name}", status_code=204)
+async def memory_state_delete(request: Request, name: str) -> Response:
+    """Delete a bounded state file (additive 2026-07-22d). 404 for unknown names, 400
+    `identity_read_only` for identity.md and the client overlays (never deletable)."""
+    memory = state_of(request).memory
+    memory.delete_state_file(name)
+    return Response(status_code=204)
+
+
 @router.get("/v1/memory/sessions")
 async def memory_sessions(
     request: Request,
@@ -111,6 +120,15 @@ async def memory_session_transcript(request: Request, session_id: str) -> dict:
     if transcript is None:
         raise BonsaiError(404, f"no such session: {session_id}", code="session_not_found")
     return transcript
+
+
+@router.delete("/v1/memory/sessions/{session_id}", status_code=204)
+async def memory_session_delete(request: Request, session_id: str) -> Response:
+    """Delete an archived session/chat and its transcript (additive 2026-07-22d).
+    404 `session_not_found` for an unknown id."""
+    memory = state_of(request).memory
+    memory.delete_session(session_id)
+    return Response(status_code=204)
 
 
 @router.get("/v1/memory")

@@ -222,6 +222,57 @@ def test_session_archive_and_transcript(store: MemoryStore) -> None:
     assert transcript["session"]["mode"] == "chat"
 
 
+def test_delete_session_removes_transcript_and_fts(store: MemoryStore) -> None:
+    store.ensure_session("sess-del", "chat")
+    store.add_message("sess-del", "user", "remember the zephyr migration")
+    store.ensure_session("sess-keep", "chat")
+    store.add_message("sess-keep", "user", "the aurora rollout")
+
+    assert store.delete_session("sess-del") is True
+    assert store.session_transcript("sess-del") is None
+    assert all(s["id"] != "sess-del" for s in store.list_sessions())
+    # the messages_fts mirror follows the delete (via the messages_ad trigger)
+    assert store.search_messages("zephyr") == []
+    # unrelated sessions and their index survive
+    assert store.session_transcript("sess-keep") is not None
+    assert store.search_messages("aurora")
+    # deleting an unknown id is a no-op, not an error
+    assert store.delete_session("sess-del") is False
+
+
+def test_delete_session_survives_archive_backreference(store: MemoryStore) -> None:
+    # an archive entry citing the session as its source must not block the delete
+    store.ensure_session("sess-src", "chat")
+    store.add_message("sess-src", "user", "the sequoia benchmark")
+    entry = store.add_entry(
+        "archive", "sequoia note", "benchmark held", source_session="sess-src"
+    )
+    assert store.delete_session("sess-src") is True
+    # the entry is kept, its dangling back-reference nulled
+    kept = store.get_entry(entry.id)
+    assert kept is not None and kept.source_session is None
+
+
+def test_service_delete_state_file_and_identity_guard(service: MemoryService) -> None:
+    service.files.write_state("scratch-note", "a throwaway working note")
+    service.remirror_files()
+    assert any(f.name == "scratch-note.md" for f in service.files.all_files())
+
+    service.delete_state_file("scratch-note.md")
+    assert all(f.name != "scratch-note.md" for f in service.files.all_files())
+
+    # identity files are never deletable over HTTP
+    with pytest.raises(BonsaiError) as ident:
+        service.delete_state_file("identity.md")
+    assert ident.value.code == "identity_read_only"
+    assert any(f.name == "identity.md" for f in service.files.all_files())
+
+    # unknown names 404 rather than touching the filesystem
+    with pytest.raises(BonsaiError) as unknown:
+        service.delete_state_file("../../etc/passwd")
+    assert unknown.value.code == "state_file_unknown"
+
+
 # -- bounded state files -----------------------------------------------------
 def test_compact_oldest_drops_leading_paragraphs() -> None:
     old = "oldest paragraph " * 20

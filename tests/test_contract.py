@@ -32,8 +32,10 @@ CONTRACT_ROUTES: list[tuple[str, str]] = [
     ("DELETE", "/v1/memory/{}"),
     ("GET", "/v1/memory/state"),
     ("PUT", "/v1/memory/state/{}"),  # additive 2026-07-21b: state-file editing
+    ("DELETE", "/v1/memory/state/{}"),  # additive 2026-07-22d: state-file delete
     ("GET", "/v1/memory/sessions"),
     ("GET", "/v1/memory/sessions/{}"),
+    ("DELETE", "/v1/memory/sessions/{}"),  # additive 2026-07-22d: chat delete
     ("POST", "/v1/memory/sessions/import"),  # additive 2026-07-22b: import chats
     ("GET", "/v1/skills"),
     ("POST", "/v1/skills/import"),  # additive 2026-07-22c: import agentskills.io skills

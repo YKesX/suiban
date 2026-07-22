@@ -536,6 +536,28 @@ class MemoryStore:
             "messages": [{"role": m[0], "content": m[1], "created_at": m[2]} for m in messages],
         }
 
+    def delete_session(self, session_id: str) -> bool:
+        """Delete an archived session and its messages. Returns False if unknown.
+
+        `messages_fts` is kept in step by the `messages_ad` trigger as rows leave
+        `messages`. Any archive entry that cited this session as its source has the
+        back-reference nulled first, so the delete never trips the (ON) foreign key.
+        """
+        with self._lock:
+            exists = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if exists is None:
+                return False
+            self._conn.execute(
+                "UPDATE memory_entries SET source_session = NULL WHERE source_session = ?",
+                (session_id,),
+            )
+            self._conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            self._conn.commit()
+        return True
+
     def search_messages(self, query: str, limit: int = 12) -> list[dict]:
         """bm25-ranked hits from session transcripts (for the recall tool)."""
         match = fts_query(query)
