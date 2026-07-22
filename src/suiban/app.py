@@ -433,7 +433,11 @@ def create_app(
             "http://tauri.localhost",
         ],
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Content-Type", "Authorization"],
+        # X-Bonsai-Client is the client-identity header every first-party UI sends
+        # (dai/sentei, additive 2026-07-22b). A browser marks it non-safelisted, so
+        # it must be allowed here or every cross-origin request fails its preflight.
+        allow_headers=["Content-Type", "Authorization", "X-Bonsai-Client"],
+        expose_headers=["X-Bonsai-Api-Version"],
     )
 
     # -- X-Bonsai-Api-Version on EVERY response ------------------------------
