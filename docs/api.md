@@ -472,4 +472,7 @@ single-use and command-bound; there is no request-level confirm field.
   `session_not_found`) and `DELETE /v1/memory/state/{name}` (remove a bounded state file;
   404 `state_file_unknown`, 400 `identity_read_only` for `identity.md` and the client
   overlays). New routes only; no existing shape changed. Per-entry `DELETE /v1/memory/{id}`
-  was already in v1.
+  was already in v1. Also `GET /` now serves a small HTML landing page for humans who
+  open the base URL in a browser ("Suiban is ready!" with client links when health is
+  `ok`, "Suiban is not ready" + a 503 otherwise). It is NOT part of the versioned API
+  surface (clients never call it) and is auth-exempt like `GET /v1/system/health`.

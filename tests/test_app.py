@@ -63,6 +63,28 @@ def test_health_ok_when_cold_and_when_warm(client: TestClient) -> None:
     assert body["checks"]["slots_ready"] == body["checks"]["slots_total"] == 4
 
 
+def test_root_landing_ready_when_healthy(client: TestClient) -> None:
+    # GET / is the human landing page: a browser used to get a bare 404 here.
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    body = resp.text
+    assert "Suiban is ready" in body
+    assert "https://github.com/YKesX/dai" in body
+    assert "https://github.com/YKesX/sentei" in body
+
+
+def test_landing_html_both_states() -> None:
+    from suiban.app import _landing_html
+
+    ready = _landing_html(True)
+    assert "Suiban is ready" in ready
+    assert "YKesX/dai" in ready and "YKesX/sentei" in ready
+    not_ready = _landing_html(False)
+    assert "Suiban is not ready" in not_ready
+    assert "Suiban is ready" not in not_ready
+
+
 def test_settings_staging_flow_over_http(client: TestClient) -> None:
     resp = client.patch("/v1/settings", json={"kv": {"preset": "aggressive"}})
     assert resp.status_code == 200

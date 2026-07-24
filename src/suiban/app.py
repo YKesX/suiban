@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import ClientDisconnect
 
@@ -460,7 +460,9 @@ def create_app(
             state is not None
             and state.auth_required
             and request.method != "OPTIONS"
-            and not (request.method == "GET" and request.url.path == "/v1/system/health")
+            # The health check and the human landing page (GET /) stay open so a
+            # browser or probe can see readiness without a token.
+            and not (request.method == "GET" and request.url.path in ("/", "/v1/system/health"))
         ):
             token = state.config.settings.server.auth_token
             provided = _bearer_token(request.headers.get("authorization"))
@@ -551,7 +553,61 @@ def create_app(
     app.include_router(schedules_router.router)
     app.include_router(slap_router.router)
     app.include_router(whatsapp_router.router)
+
+    @app.get("/", include_in_schema=False)
+    async def root(request: Request) -> HTMLResponse:
+        """Human landing page (not part of the v1 contract). Ready when health is ok."""
+        health = await system.get_health(request)
+        ready = health.get("status") == "ok"
+        return HTMLResponse(_landing_html(ready), status_code=200 if ready else 503)
+
     return app
+
+
+_DAI_URL = "https://github.com/YKesX/dai"
+_SENTEI_URL = "https://github.com/YKesX/sentei"
+
+
+def _landing_html(ready: bool) -> str:
+    """The human landing page served at GET /.
+
+    A first-time visitor who opens http://127.0.0.1:8686/ in a browser used to see
+    a bare 404 JSON; this tells them whether the server is ready and where the two
+    clients live. suiban is an API, not a website, so this is the only page it serves.
+    """
+    if ready:
+        headline = "Suiban is ready!"
+        body = (
+            f'use <a href="{_DAI_URL}">dai</a> for GUI '
+            f'or <a href="{_SENTEI_URL}">sentei</a> for the cli tool!'
+        )
+    else:
+        headline = "Suiban is not ready"
+        body = 'see <a href="/v1/system/health">/v1/system/health</a> for details.'
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>suiban</title>
+<style>
+  :root {{ color-scheme: light dark; --paper:#f3f3ef; --ink:#111; --muted:#5d5d5d; }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --paper:#161614; --ink:#ececea; --muted:#a8a8a2; }}
+  }}
+  html,body {{ height:100%; margin:0; }}
+  body {{
+    display:grid; place-items:center; text-align:center; padding:2rem;
+    background:var(--paper); color:var(--ink);
+    font-family:"Avenir Next","Helvetica Neue","Segoe UI",sans-serif;
+  }}
+  h1 {{
+    font-family:"Iowan Old Style","Palatino Linotype",serif; font-weight:600;
+    letter-spacing:-0.03em; font-size:clamp(1.8rem,5vw,3rem); margin:0 0 0.75rem;
+  }}
+  p {{ color:var(--muted); font-size:1.1rem; line-height:1.6; margin:0; max-width:34rem; }}
+  a {{ color:var(--ink); text-underline-offset:3px; }}
+</style></head>
+<body><main><h1>{headline}</h1><p>{body}</p></main></body></html>
+"""
 
 
 def _bearer_token(header: str | None) -> str | None:

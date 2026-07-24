@@ -12,6 +12,7 @@ from fastapi.routing import APIRoute
 
 # (method, path-template) — path params normalized to {}.
 CONTRACT_ROUTES: list[tuple[str, str]] = [
+    ("GET", "/"),  # human landing page (additive 2026-07-22d; not a v1 API route)
     ("POST", "/v1/chat/completions"),
     ("GET", "/v1/models"),
     ("POST", "/v1/jobs"),
